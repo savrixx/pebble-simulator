@@ -18,7 +18,7 @@
 
  6.  Device Registration
 
- 7.  Set Device IMEI (Current: 498090403799636)
+ 7.  Set Device IMEI (Current: 351358813267660)
 
  8.  Update ECC key pair
 

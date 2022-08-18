@@ -1,0 +1,10 @@
+# Copyright (c) 2022 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+if BOARD_CS_PEBBLETRKR_01
+
+config BOARD
+	default "cs_pebbletrkr-01"
+
+
+endif
