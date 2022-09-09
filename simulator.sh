@@ -1,7 +1,6 @@
 #!/bin/bash
 
 . ./pebble-firmware-blockchain.sh
-. ./utils.sh
 # version
 VER="v1.04"
 
@@ -9,9 +8,13 @@ VER="v1.04"
 default_mode="random"
 
 # default mqtt publish topic
-device_id="$(openssl rand -hex 100 | tr -dc '[:digit:]'|head -c15)"
-default_pubtopic="device/${device_id}/data"
+device_id="352656103380963"
+default_pubtopic="device/nrf-${device_id}/data"
 mqttMode="publish"
+
+# config  mqtt broker host (tls)
+MQTT_BROKER_HOST="a11homvea4zo8t-ats.iot.us-east-1.amazonaws.com"
+MQTT_BROKER_PORT=8883
 
 # config  mqtt broker host (no tls)
 MQTT_BROKER_HOST_TEST="trypebble.io"
@@ -52,7 +55,6 @@ temp_mode=$default_mode
 
 timestp="3334970018"
 #timestp_mode="fixed"
-randomHex="58b66cbaed0c63c3"
 
 RANDOM_MAX_INT=32768
 
@@ -64,30 +66,15 @@ CountPkg=30
 genFile="$(pwd)/pebble.dat"
 
 
-
-
-trap 'ExitClrAll;exit' 2
-
-function ExitClrAll () {
-    process_mosquot=$(ps -ef | grep  mosquitto_sub | grep -v grep | awk '{print $2}')
-    process_mosquotpub=$(ps -ef | grep  mosquitto_pub | grep -v grep | awk '{print $2}')
-    kill ${process_ota} ${process_heartbeat} ${process_mosquot} ${process_mosquotpub} >/dev/null 2>&1
-    
-}
+trap "echo 'exit...';exit" 2
 
 getTime()
 {
-
-    if [ $OSTYPE == "Linux" ];then
-        current=`date "+%Y-%m-%d %H:%M:%S"`
-        timeStamp=`date -d "$current" +%s`        
-    elif [ $OSTYPE == "Darwin" ];then
-        timeStamp=`date +%s`   
-    fi    
+	current=`date "+%Y-%m-%d %H:%M:%S"`
+	timeStamp=`date -d "$current" +%s`
 	# ms
-	#currentTimeStamp=$(( timeStamp*1000+`date "+%N"`/1000000 ))
-	#echo $currentTimeStamp
-	echo  $timeStamp
+	currentTimeStamp=$(( timeStamp*1000+`date "+%N"`/1000000 ))
+	echo $currentTimeStamp
 }
 
 
@@ -251,20 +238,14 @@ NextData()
      fi
      # GPS
      if [ $gps_mode == "random" ];then
-        gps_g=$[RANDOM%2]
-        let gps_g=gps_g*-1-gps_g+1
-        gps_m=$( RandomFloat 1 7 90 )
-        #gps_g=$( RandomInt 0 90 )
-        #let gps_g=gps_g*100
-        #GPS[0]=$(echo $gps_g+$gps_m |bc -l)
-        GPS[0]=$(echo $gps_g*$gps_m |bc -l)
-        gps_g=$[RANDOM%2]
-        let gps_g=gps_g*-1-gps_g+1        
-        gps_m=$( RandomFloat 1 7 180 )     
-        #gps_g=$( RandomInt 0 180 )
-        #let gps_g=gps_g*100
-        #GPS[1]=$(echo $gps_g+$gps_m |bc -l)
-        GPS[1]=$(echo $gps_g*$gps_m |bc -l)
+         gps_m=$( RandomFloat 1 5 60 )
+         gps_g=$( RandomInt 0 90 )
+         let gps_g=gps_g*100
+         GPS[0]=$(echo $gps_g+$gps_m |bc -l)
+         gps_m=$( RandomFloat 1 5 60 )
+	 gps_g=$( RandomInt 0 180 )
+	 let gps_g=gps_g*100
+         GPS[1]=$(echo $gps_g+$gps_m |bc -l)
      elif [ $snr_mode == "linear" ];then
          GPS[0] = $(echo ${GPS[0]} + 2.1000|bc -l)
          GPS[1] = $(echo ${GPS[1]} + 2.1000|bc -l)
@@ -301,11 +282,11 @@ NextData()
       fi
       # Light
       if [ $light_mode == "random" ];then
-         LIGHT=$( RandomFloat 1 2 2000 )
+         LIGHT=$( RandomFloat 1 5 2000 )
      elif [ $light_mode == "linear" ];then
-         LIGHT=$(echo $LIGHT+50.10|bc -l)
+         LIGHT=$(echo $LIGHT+50.10001|bc -l)
          if [ $LIGHT > 2000 ];then
-             LIGHT=10.14
+             LIGHT=10.14545
          fi
      fi
      # gyroscope
@@ -352,56 +333,51 @@ NextData()
              accel[2]=500
          fi
       fi
-    #temperature
-    if [ $temp_mode == "random" ];then
-        temp=$( RandomFloat 1 5 80 )
-    elif [ $temp_mode == "linear" ];then
-        temp=$(echo $temp+2.10001|bc -l)
-        if [ $temp > 80 ];then
-            temp=10.14545
-        fi
-    fi
-    if [ $OSTYPE == "Linux" ];then
-        current=`date "+%Y-%m-%d %H:%M:%S"`
-        timeStamp=`date -d "$current" +%s`        
-    elif [ $OSTYPE == "Darwin" ];then
-        timeStamp=`date +%s`   
-    fi             
-    timestp=$timeStamp
-    randomHex=$(openssl rand -hex 8)
+      #temperature
+      if [ $light_mode == "random" ];then
+         temp=$( RandomFloat 1 5 80 )
+     elif [ $light_mode == "linear" ];then
+         temp=$(echo $temp+2.10001|bc -l)
+         if [ $temp > 80 ];then
+             temp=10.14545
+         fi
+     fi
+      let timestp=timestp+5000
 }
 
 GenerateFile()
 {
     if [ -a $genFile ];then
-        rm $genFile
+    	rm $genFile
     fi
-    privKey=$(cat privKey)
+
+    # Extract pub key  exponent
+    PUBKEY=$(grep -v -- ----- rsa_public_key.pem | tr -d '\n')
+    EXPLINE=$(echo $PUBKEY | base64 -d | openssl asn1parse -inform DER -i -strparse 19| head -4 | tail -1)
+    IFS=':'
+    read -a strarr <<< "$EXPLINE"
+    rsa_exp=${strarr[3]}
+    # Extract pub key  modulus
+    MODLINE=$(echo $PUBKEY | base64 -d | openssl asn1parse -inform DER -i -strparse 19| tail -2 | head -1)
+    read -a strarr <<< "$MODLINE"
+    rsa_mod=${strarr[3]}
+    # reset spit char
+    IFS=''
+
     for((integer = 1; integer <= $CountPkg; integer++))
     do
 	NextData
-        sleep 1
-        objMessage="\"message\":{\"snr\":$SNR,\"vbat\":$VBAT,\"latitude\":${GPS[0]},\"longitude\":${GPS[1]},\"gasResistance\":${ENV[0]},\"temperature\":${ENV[1]},\"pressure\":${ENV[2]},\"humidity\":${ENV[3]},\"light\":$LIGHT,\"temperature2\":$temp,\"gyroscope\":[${gyr[0]},${gyr[1]},${gyr[2]}],\"accelerometer\":[${accel[0]},${accel[1]},${accel[2]}],\"timestamp\":\"$timestp\",\"random\":\"$randomHex\"}"
-        sign_msg="{$objMessage}"
-        #if [ $OSTYPE == "Linux" ];then
-        #    ecc_str=$( ./sign_linux  $privKey $sign_msg)
-        #elif [ $OSTYPE == "Darwin" ];then
-        #    ecc_str=$( ./sign_osx $privKey $sign_msg)
-        #else
-        #    echo "Unknow os type"
-        #    return
-        #fi       
-        #sign_r=$(echo ${ecc_str:2:64})
-        #sign_s=$(echo ${ecc_str:66:64})
-        #echo "{$objMessage,\"signature\":{\"r\":\"$sign_r\",\"s\":\"$sign_s\"}}" >> $genFile
-        echo "{$objMessage}" >> $genFile
+       objMessage="\"message\":{\"RSA_N\":\"$rsa_mod\",\"RSA_E\":\"$rsa_exp\",\"SNR\":$SNR,\"VBAT\":$VBAT,\"latitude\":${GPS[0]},\"longitude\":${GPS[1]},\"gas_resistance\":${ENV[0]},\"temperature\":${ENV[1]},\"pressure\":${ENV[2]},\"humidity\":${ENV[3]},\"temperature\":$temp,\"gyroscope\":[${gyr[0]},${gyr[1]},${gyr[2]}],\"accelerometer\":[${accel[0]},${accel[1]},${accel[2]}],\"timestamp\":\"$timestp\"}"
+       ecc_str=$(echo $objMessage |openssl dgst -sha256 -sign tracker01.key |hexdump -e '16/1 "%02X"')
+       sign_r=$(echo ${ecc_str:8:64})
+       sign_s=$(echo ${ecc_str:76:64})
+       echo "{$objMessage,\"signature\":{\"r\":\"$sign_r\",\"s\":\"$sign_s\"}}" >> $genFile
     done
 
 }
 # AWS IOT
 AWSIOTUpload()
 {
-    default_pubtopic="device/${device_id}/data"
     printf '\033\143'
     echo ""
     if [ ! -f "$genFile" ];then
@@ -414,24 +390,12 @@ AWSIOTUpload()
     fi
     echo "Publishing to Topic [$default_pubtopic] @ [$MQTT_BROKER_HOST:$MQTT_BROKER_PORT]"
     echo "Press CTR+C to terminate"
-    let index=0
     while read oneline
     do
-        #grp_msg=$(echo $oneline | awk -F'},' '{print $1"}"}' |awk -F':{' '{print $1":", "{"$2}')        
-        #read head_msg raw_msg <<< $grp_msg
-        #tail_msg=$(echo $oneline | awk -F'},' '{print ","$2}')
-        #hexStr=$(echo $raw_msg|hexdump -e '16/1 "%02X"'|cut -d' ' -f1)
-        #objMsg=${head_msg}\"${hexStr}\"${tail_msg}
-        #mosquitto_pub -t  $default_pubtopic -m $objMsg -h $MQTT_BROKER_HOST  --cafile "$(pwd)/AmazonRootCA1.pem" --cert  "$MQTT_CERT" --key  "$MQTT_KEY"  --insecure -p $MQTT_BROKER_PORT
-        #mosquitto_pub -t  $default_pubtopic -m $oneline -h $MQTT_BROKER_HOST  --cafile "$(pwd)/AmazonRootCA1.pem" --cert  "$MQTT_CERT" --key  "$MQTT_KEY"  --insecure -p $MQTT_BROKER_PORT
-        if [ $OSTYPE == "Linux" ];then
-            ./DataEncode_Linux "$oneline" "$TYPE_SENSRO_DATA" |openssl dgst -sha256 -binary |openssl pkeyutl -sign -inkey tracker01.key |./PackEncode_Linux "$oneline" "$TYPE_SENSRO_DATA" |mosquitto_pub -t  $default_pubtopic -s  -h $MQTT_BROKER_HOST  --cafile "$(pwd)/AmazonRootCA1.pem" --cert  "$MQTT_CERT" --key  "$MQTT_KEY"  --insecure -p $MQTT_BROKER_PORT
-        elif [ $OSTYPE == "Darwin" ];then
-            ./DataEncode_Darwin "$oneline" "$TYPE_SENSRO_DATA" |openssl dgst -sha256 -binary |openssl pkeyutl -sign -inkey tracker01.key |./PackEncode_Darwin "$oneline" "$TYPE_SENSRO_DATA" |mosquitto_pub -t  $default_pubtopic -s  -h $MQTT_BROKER_HOST  --cafile "$(pwd)/AmazonRootCA1.pem" --cert  "$MQTT_CERT" --key  "$MQTT_KEY"  --insecure -p $MQTT_BROKER_PORT
-        fi             
-        #echo "$index"
-        #let index=index+1
-        sleep  $MQTT_UPLOAD_INTERVAL         
+        mosquitto_pub -t  $default_pubtopic -m $oneline -h $MQTT_BROKER_HOST  --cafile "$(pwd)/AmazonRootCA1.pem" --cert  "$(pwd)/cert.pem" --key  "$(pwd)/private.pem"  --insecure -p $MQTT_BROKER_PORT
+        sleep  $MQTT_UPLOAD_INTERVAL
+
+
     done < $genFile
 
     echo  "Succesfully published!"
@@ -470,43 +434,20 @@ NumberofPackages()
 {
 	printf '\033\143'
 	echo "How many packages you want to generate :"
-	read key    
+	read key
         CountPkg=$key
 }
-SetPebbleId()
-{ 	
-    while true
-    do
-        printf '\033\143'
-        read -p "Input 15 digits or enter to use the default value : " key
-        [ ${#key} != 15 ] && [ ${#key} != 0 ] && echo "" && echo "The input is incorrect, please re-enter" && sleep 2 && continue
-        [ ${#key} != 0  ] && device_id="$key" 
-        echo $device_id > device_imei
-        kill  $process_heartbeat
-        upload_config
-
-        ./heartbeat.sh ${device_id} $timestp $MQTT_CERT $MQTT_KEY $MQTT_BROKER_HOST $MQTT_BROKER_PORT &
-        process_heartbeat=$!
-        break
-    done 
-}
-
 PebbleBlockchain()
 {  
-    printf '\033\143'
-    echo " Not yet supported."
-    echo " "
-    return 0
-
-    printf '\033\143'
+ 	printf '\033\143'
 	echo "Pebble-firmware-blockchain program process" 
     echo "Pebble contract : $pebble_contract"
-    echo "Device IMEI : $device_id"  
+    echo "Pebble id : $device_id"  
     echo "Press CTR+C to terminate"
     endpoint="null"
     while true
     do
-        response=$( GetResponse "$device_id"  "$pebble_contract" "$OSTYPE" )
+        response=$( GetResponse "$device_id"  "$pebble_contract" )
         #echo "response:$response"
         duration=$(echo $response | cut -d';' -f1 | cut -d':' -f2)
         #echo "duration:$duration"
@@ -542,246 +483,11 @@ PebbleBlockchain()
     done
     return 0
 }
-PebbleRegistration()
-{ 
-    printf '\033\143'
-    echo "Device IMEI : $device_id"
-    echo ""
-    echo "Add a device on the following page:  https://app.iott.network/" 
-    echo ""
-    #regRq=$(mosquitto_sub  -t  "device/${device_id}/action/add" -h $MQTT_BROKER_HOST -C 1 --cafile "$(pwd)/AmazonRootCA1.pem" --cert  "$MQTT_CERT" --key  "$MQTT_KEY"  --insecure -p $MQTT_BROKER_PORT)
-    while true
-    do
-        regRq=$(mosquitto_sub  -t  "backend/${device_id}/status" -h $MQTT_BROKER_HOST -C 1 --cafile "$(pwd)/AmazonRootCA1.pem" --cert  "$MQTT_CERT" --key  "$MQTT_KEY"  --insecure -p $MQTT_BROKER_PORT)
-        status=$(echo $regRq | awk -F , '{print $1}'| awk -F \: '{print $2}') 
-        if [ $status == "1" ];then
-            break
-        fi
-        if [ $status == "2" ];then
-            echo "Device already registered."
-            echo ""
-            echo "Press any key to return to the main menu."
-    
-            read -n 1 key 
-            return 1
-        fi
-    done 
-    
-    echo "Receive the user wallet address, start signing and sending "
-    #wallet=$(echo $regRq | awk -F , '{print $4}'| awk -F \" '{print $4}')
-    #echo $regRq
-    wallet=$(echo $regRq | awk -F , '{print $2}'| awk -F \" '{print $4}')
-    wallet=${wallet:2}
-    #echo $wallet
-    #public="30a8f41d35ba3cfe39cc1effab498683796e53191abf1226c3637c801556bdf87ffe428c9ad533d802b8487b319ffc2435a100536ac5fba87052354f52ba1713"
-    objMessage="\"message\":{\"walletAddress\":\"$wallet\",\"timestamp\":\"$timestp\",\"channel\":\"8183\"}"
-    sign_msg="{$objMessage}"
-    #ecc_str=$(echo $sign_msg |openssl dgst -sha256 -sign tracker01.key |hexdump -e '16/1 "%02X"')
-    #sign_r=$(echo ${ecc_str:8:64})
-    #sign_s=$(echo ${ecc_str:76:64})   
-    #msg="{$objMessage,\"signature\":{\"r\":\"$sign_r\",\"s\":\"$sign_s\"}}"
-    #mosquitto_pub -t  "device/${device_id}/action/confirm" -m "$msg" -h $MQTT_BROKER_HOST  --cafile "$(pwd)/AmazonRootCA1.pem" --cert  "$MQTT_CERT" --key  "$MQTT_KEY"  --insecure -p $MQTT_BROKER_PORT 
-    if [ $OSTYPE == "Linux" ];then
-        ./DataEncode_Linux "$sign_msg" "$TYPE_REG_CONFIRM" |openssl dgst -sha256 -binary |openssl pkeyutl -sign -inkey tracker01.key |./PackEncode_Linux $sign_msg $TYPE_REG_CONFIRM |mosquitto_pub -t  "device/${device_id}/confirm" -s  -h $MQTT_BROKER_HOST  --cafile "$(pwd)/AmazonRootCA1.pem" --cert  "$MQTT_CERT" --key  "$MQTT_KEY"  --insecure -p $MQTT_BROKER_PORT
-    elif [ $OSTYPE == "Darwin" ];then
-        ./DataEncode_Darwin "$sign_msg" "$TYPE_REG_CONFIRM" |openssl dgst -sha256 -binary |openssl pkeyutl -sign -inkey tracker01.key |./PackEncode_Darwin $sign_msg $TYPE_REG_CONFIRM |mosquitto_pub -t  "device/${device_id}/confirm" -s  -h $MQTT_BROKER_HOST  --cafile "$(pwd)/AmazonRootCA1.pem" --cert  "$MQTT_CERT" --key  "$MQTT_KEY"  --insecure -p $MQTT_BROKER_PORT
-    fi 
-    echo ""
-    echo  "Succesfully responded!"
-    echo  "Waiting for backend !"
-    echo ""       
-
-
-    while true
-    do
-        regRq=$(mosquitto_sub  -t  "backend/${device_id}/status" -h $MQTT_BROKER_HOST -C 1 --cafile "$(pwd)/AmazonRootCA1.pem" --cert  "$MQTT_CERT" --key  "$MQTT_KEY"  --insecure -p $MQTT_BROKER_PORT)
-
-        status=$(echo $regRq | awk -F , '{print $1}'| awk -F \: '{print $2}') 
-        if [ $status == "2" ];then
-            break
-        fi
-    done 
-    upload_config
-    echo "Device registration complete !"
-    #if [ -n "$regRq" ] && [ "$regRq" == "1" ]; then
-    #    echo "Device registration complete !"
-    #else
-    #    echo "Device registration failed !"
-    #fi
-    echo "Press any key to return to the main menu"
-    echo ""
-    read -n 1 key    
-    return 1
-}
-gen_key_pair()
-{
-    printf '\033\143'
-    echo "The original key pair will be deleted. Are you sure to generate a new key pair (N/Y)?"
-    echo ""   
-    read -n 1 key
-    if [ "$key" != "Y" ];then
-        return 0
-    fi
-    echo ""
-    if [ -a "tracker01.key" ];then
-        rm "tracker01.key"
-    fi  
-    openssl ecparam -name secp256k1 -genkey -out  tracker01.key 2>&1 1>/dev/null
-    key_str=$(openssl ec -in tracker01.key -text -noout)
-    priv_key=$(echo $key_str|awk '{print $5$6$7 }'|sed 's/://g') 
-    pub_key=$(echo $key_str|awk '{print $9$10$11$12$13}'|sed 's/://g') 
-    echo ${priv_key:0-64} > privKey
-    echo $pub_key  > pubKey_uncompressed
-    key_str=$(openssl ec -in tracker01.key -pubout  -text -noout -conv_form compressed)
-    pub_key=$(echo $key_str|awk '{print $9$10$11}'|sed 's/://g') 
-    echo $pub_key  > pubKey_compressed
-    echo ""
-    echo "ECC key pair updated successfully."
-    echo ""
-    echo "You should regenerate the data after updating the ECC key pair."
-    echo ""
-    echo "Press any key to return to the main menu."
-    echo ""
-    read -n 1 key    
-    return 1    
-}
-InputPrikey()
-{
-    printf '\033\143'
-    read -p "Input new priavte key: " key 
-    if [ ${#key} == 0 ];then
-        return
-    fi
-    privKeyHex=$key
-    ## Create .pem and .pub files
-    #############################
-    pubKeyHex="$(openssl ec -inform DER -text -noout -in <(cat <(echo -n "302e0201010420") <(echo -n "${privKeyHex}") <(echo -n "a00706052b8104000a") | xxd -r -p) 2>/dev/null | tail -6 | head -5 | sed 's/[ :]//g' | tr -d '\n')"
-    asnFormatKey="30740201010420${privKeyHex}a00706052b8104000aa144034200${pubKeyHex}"
-    echo "-----BEGIN EC PARAMETERS-----" > tracker01.key
-    echo 06052b8104000a | xxd -r -p |base64 >> tracker01.key
-    echo "-----END EC PARAMETERS-----" >> tracker01.key
-    echo "-----BEGIN EC PRIVATE KEY-----" >> tracker01.key
-    echo $asnFormatKey | xxd -r -p | base64 | fold -w 64 >> tracker01.key
-    echo "-----END EC PRIVATE KEY-----" >> tracker01.key
-    echo $privKeyHex > privKey    
-}
-
-UpdatePrivkey()
-{
-    while true
-    do
-        printf '\033\143'       
-        echo "" 
-        echo " 1.  Enter private key"
-        echo ""
-        echo " 2.  Generate new private key"
-        echo ""   
-        echo " 3.  Return to the main menu"
-        read -n 1 key
-        if [[ $key == "1" ]];then
-            InputPrikey
-        elif [[ $key == "2" ]] ;then
-            gen_key_pair
-            if [ $? == "1" ] ;then
-                break
-            fi                                                
-        else
-            echo ""
-            break
-        fi
-    done
-}
-NetSelection()
-{
-    while true
-    do
-        printf '\033\143'       
-        echo "" 
-        echo " Please select a network"duihao
-        echo ""
-        if [[ $NETTYPE == "testnet" ]];then
-            echo "✓    1.  Testnet"
-            echo ""
-            echo "     2.  Mainnet"
-            echo ""
-        else
-            echo "     1.  Testnet"
-            echo ""
-            echo "✓    2.  Mainnet"
-            echo ""
-        fi
-        echo "     3.  Return to the main menu"
-        read -n 1 key
-        if [[ $key == "1" ]];then
-            net_selection  "testnet"
-        elif [[ $key == "2" ]] ;then
-            net_selection  "mainnet"
-        else
-            echo ""
-            break
-        fi
-
-        kill  $process_heartbeat 2>/dev/null
-        upload_config 2>/dev/null
-
-        ./heartbeat.sh ${device_id} $timestp $MQTT_CERT $MQTT_KEY $MQTT_BROKER_HOST $MQTT_BROKER_PORT &
-        process_heartbeat=$!
-    done
-}
-
-upload_config()
-{
-    if [ $OSTYPE == "Linux" ];then
-        current=`date "+%Y-%m-%d %H:%M:%S"`
-        timeStamp=`date -d "$current" +%s`        
-    elif [ $OSTYPE == "Darwin" ];then
-        timeStamp=`date +%s`   
-    fi 
-    timestp=$timeStamp    
-    confStr="{\"message\":{\"bulkUpload\":\"0\",\"dataChannel\":\"8183\",\"uploadPeriod\":\"10\",\"bulkUploadSamplingCnt\":\"60\",\"bulkUploadSamplingFreq\":\"10\",\"beep\":\"1000\",\"firmware\":\"pebbleGo V1.0.0\",\"timestamp\":\"$timestp\"}}"
-    #mosquitto_pub -t  "device/${device_id}/config" -m "${confStr}" -h $MQTT_BROKER_HOST  --cafile "$(pwd)/AmazonRootCA1.pem" --cert  "$MQTT_CERT" --key  "$MQTT_KEY"  --insecure -p $MQTT_BROKER_PORT 
-    if [ $OSTYPE == "Linux" ];then
-        ./DataEncode_Linux "$confStr"  "$TYPE_CONF_UP_LOAD"|openssl dgst -sha256 -binary |openssl pkeyutl -sign -inkey tracker01.key |./PackEncode_Linux "$confStr" "$TYPE_CONF_UP_LOAD" |mosquitto_pub -t  "device/${device_id}/data" -s  -h $MQTT_BROKER_HOST  --cafile "$(pwd)/AmazonRootCA1.pem" --cert  "$MQTT_CERT" --key  "$MQTT_KEY"  --insecure -p $MQTT_BROKER_PORT
-    elif [ $OSTYPE == "Darwin" ];then
-        ./DataEncode_Darwin "$confStr"  "$TYPE_CONF_UP_LOAD"|openssl dgst -sha256 -binary |openssl pkeyutl -sign -inkey tracker01.key |./PackEncode_Darwin "$confStr" "$TYPE_CONF_UP_LOAD" |mosquitto_pub -t  "device/${device_id}/data" -s  -h $MQTT_BROKER_HOST  --cafile "$(pwd)/AmazonRootCA1.pem" --cert  "$MQTT_CERT" --key  "$MQTT_KEY"  --insecure -p $MQTT_BROKER_PORT
-    fi
-}
-isInstalled()
-{
-    toolpath=$(which $1)
-    [ -n "${toolpath}" ] && return 1
-    return 0
-}
-
-envCheck()
-{
-    isInstalled  mosquitto_pub
-    ret=$?
-    if [ $ret -eq 0 ]; then
-        echo ""
-        echo "Mosquitto is not installed, please install the mosquitto package"
-        echo ""
-        exit
-    fi
-    isInstalled  openssl
-    ret=$?
-    if [ $ret -eq 0 ]; then
-        echo ""
-        echo "Openssl is not installed, please install the openssl package"
-        echo ""
-        exit
-    fi
-    if [[ -s device_imei ]];then
-        device_id=$(cat device_imei)
-    else
-        echo $device_id > device_imei
-    fi
-}
 
 main()
-{    
+{
     RSAInit
-    timestp=$( getTime )    
+    timestp=$( getTime )
     #echo $timestp
     while true
     do
@@ -791,21 +497,17 @@ main()
         echo ""
         echo " 1.  Config Sensors"
         echo ""
-        echo " 2.  Set Number of Data Points (Current: ${CountPkg})"
+        echo " 2.  Set Number of Data Points (Current $CountPkg)"
         echo ""
         echo " 3.  Generate Simulated Data"
         echo ""
-        echo " 4.  Publish to IoTT Portal"
+        echo " 4.  Publish to AWS MQTT"
         echo ""
-        echo " 5.  Device Registration"
+        echo " 5.  Publish to trypebble.io"
         echo ""
-        echo " 6.  Set Device IMEI (Current: $(cat device_imei))"
-        echo ""     
-        echo " 7.  Config device privkey (Current: $(cat privKey))"
-        echo ""   
-        echo " 8.  Networks (Current: ${NETTYPE})"
-        echo ""   
-        echo " 9.  Exit"
+        echo " 6.  Pebble blockchain"
+        echo ""
+        echo " 7.  Exit"
         echo ""
         echo "Select:"
         read -n 1 key
@@ -825,14 +527,19 @@ main()
         elif [[ $key == "4" ]];then
             echo ""
             AWSIOTUpload
+            if [ $? == "0" ] ;then
+              break
+            fi
         elif [[ $key == "5" ]];then
-            PebbleRegistration   
+            TrypebbleUpload
+            if [ $? == "0" ] ;then
+              break
+            fi
         elif [[ $key == "6" ]];then
-            SetPebbleId  
-        elif [[ $key == "7" ]];then
-            UpdatePrivkey
-        elif [[ $key == 8 ]];then
-            NetSelection
+            PebbleBlockchain
+            if [ $? == "0" ] ;then
+              break
+            fi            
         else
             echo ""
             break
@@ -840,13 +547,5 @@ main()
     done
 }
 
-envCheck
-os_detect
-upload_config
-./ota_update.sh $MQTT_CERT $MQTT_KEY $MQTT_BROKER_HOST $MQTT_BROKER_PORT &
-process_ota=$!
-./heartbeat.sh ${device_id} $timestp $MQTT_CERT $MQTT_KEY $MQTT_BROKER_HOST $MQTT_BROKER_PORT &
-process_heartbeat=$!
+
 main
-#clear backends
-ExitClrAll
