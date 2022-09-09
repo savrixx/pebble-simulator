@@ -5,6 +5,23 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "command": "npm start",
+            "name": "Run npm start",
+            "request": "launch",
+            "type": "node-terminal"
+        },
+        {
+            "cwd": "${workspaceFolder}",
+            "executable": "./bin/executable.elf",
+            "name": "Debug with JLink",
+            "request": "launch",
+            "type": "cortex-debug",
+            "device": "",
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none",
+            "servertype": "jlink"
+        },
+        {
             "type": "solidityMeadow",
             "request": "launch",
             "name": "Debug Solidity (via unit test run)"
