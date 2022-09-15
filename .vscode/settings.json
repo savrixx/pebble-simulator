@@ -2,5 +2,7 @@
     "nrf-connect.toolchain.path": "${nrf-connect.toolchain:2.0.0}",
     "nrf-connect.boardRoots": [
         "${workspaceFolder}"
-    ]
+    ],
+    "solidity-va.mode.active": false,
+    "solidity-va.findAllReferences.enable": false
 }

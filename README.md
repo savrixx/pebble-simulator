@@ -38,9 +38,9 @@ $ ./simulator.sh
 
  5.  Device Registration
 
- 6.  Set Device IMEI (Current: 103381234567402)
+ 6.  Set Device IMEI (Current: 351358813267660)
 
- 7.  Config device privkey (Current: 0510802dad279d7451c63ab28a44915ffc1fa61db98c276a16f8b0f1e87ec1af)
+ 7.  Config device privkey (Current: c542f9196d6142eb5fbb829c6e3ad6522d17f11294f0a128a1f535058fa01c2f)
 
  8.  Exit
 
